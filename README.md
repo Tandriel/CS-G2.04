@@ -18,13 +18,3 @@ Ideas:
               - possible extensions might be public transport, food, hotels, places of interest, etc.
               
               - special feature: 
-
-            
-
-
-    - nutrition App thingy 
-        - user input: calories, protein etc.; desired weight gain/loss; 
-        - (maybe muscle gain) 
-        - differentiate between age groups, gender, protein intake, type of exercise 
-
-    - U
