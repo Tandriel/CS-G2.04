@@ -2,71 +2,88 @@ import streamlit as st
 import html
 import pydeck as pdk
 from ui_components import inject_custom_css
+from activity_types.hiking import get_hiking_route
+from activity_types.cycling import get_cycling_route
+from layouts.carousel_card import render_carousel_card
 
-def render_activity_card(activity, distance_km):
+def render_activity_card(activity, distance_km=None):
     """
-    Render an activity as a swipe-style card with image carousel and inline map.
+    Display a swipe-style activity card. For hiking/cycling, show a route map and trail info.
+    For other activities, use the image carousel card.
     """
-    inject_custom_css()
+    inject_custom_css()  # Ensure custom CSS (e.g., card styling) is applied
 
+    # Extract and sanitize basic activity info
     name = html.escape(activity.get("name", "Unknown"))
     category = html.escape(activity.get("category", "Activity"))
+    category_lower = category.lower()
     rating = activity.get("rating", "N/A")
     address = html.escape(activity.get("address", ""))
     price = activity.get("price", "")
-    yelp_url = activity.get("url", "")
-    photos = activity.get("photos") or [activity.get("image_url")]
-    dist_text = f"{distance_km:.1f} km away" if distance_km is not None else ""
+    # (Optional: Yelp URL could be used for a "View on Yelp" link in details view)
     lat = activity.get("lat")
     lon = activity.get("lon")
 
-    # Setup carousel image index
-    key_prefix = f"{name.replace(' ', '_')}_carousel"
-    index_key = f"image_index_{key_prefix}"
-    if index_key not in st.session_state:
-        st.session_state[index_key] = 0
+    if category_lower in ["hiking", "cycling"]:
+        # --- Hiking/Cycling: Display route map and trail information ---
+        # Only proceed if we have user location and destination coordinates
+        user_lat, user_lon = st.session_state.get("user_location", (None, None))
+        if user_lat and user_lon and lat and lon:
+            # Get route path and stats from OpenRouteService helper functions
+            route = get_hiking_route(user_lat, user_lon, lat, lon) if category_lower == "hiking" \
+                    else get_cycling_route(user_lat, user_lon, lat, lon)
+            path = route["path"]  # list of [lat, lon] or [lon, lat] coordinates forming the route
+            trail_distance = route["distance"] / 1000.0  # convert meters to kilometers
+            duration_min = int(route["duration"] / 60.0)  # convert seconds to minutes
+            ascent = route.get("ascent", 0)
+            descent = route.get("descent", 0)
 
-    max_index = len(photos) + (1 if lat and lon else 0)
-    index = st.session_state[index_key]
+            # Open a card container (HTML) and insert the activity header
+            st.markdown(f"""
+            <div class="card">
+                <h3>{name}</h3>
+                <p><strong>{category}</strong> • ⭐ {rating} • {price}</p>
+                <p>{address}</p>
+            """, unsafe_allow_html=True)
 
-    # Carousel navigation buttons
-    col1, col2, col3 = st.columns([1, 6, 1])
-    with col1:
-        if st.button("⬅️", key=f"prev_{key_prefix}"):
-            st.session_state[index_key] = max(0, index - 1)
-    with col3:
-        if st.button("➡️", key=f"next_{key_prefix}"):
-            st.session_state[index_key] = min(max_index - 1, index + 1)
+            # Show interactive route map with Pydeck (path and marker)
+            st.pydeck_chart(pdk.Deck(
+                map_style="mapbox://styles/mapbox/light-v9",
+                initial_view_state=pdk.ViewState(latitude=lat, longitude=lon, zoom=13, pitch=0),
+                layers=[
+                    # Path layer for the trail/route
+                    pdk.Layer(
+                        "PathLayer",
+                        data=[{"path": path}],
+                        get_path="path",
+                        get_color=[0, 100, 200],
+                        width_scale=10,
+                        width_min_pixels=2,
+                    ),
+                    # Marker at the destination (activity location)
+                    pdk.Layer(
+                        "ScatterplotLayer",
+                        data=[{"position": [lon, lat]}],
+                        get_position="position",
+                        get_color=[255, 0, 0],
+                        get_radius=100
+                    )
+                ]
+            ), use_container_width=True)
 
-    st.markdown("<div class='card'>", unsafe_allow_html=True)
-
-    # Show image or map
-    if index < len(photos):
-        st.markdown(f"<img src=\"{photos[index]}\" alt=\"activity image\">", unsafe_allow_html=True)
-    elif lat and lon:
-        st.pydeck_chart(pdk.Deck(
-            map_style='mapbox://styles/mapbox/light-v9',
-            initial_view_state=pdk.ViewState(
-                latitude=lat,
-                longitude=lon,
-                zoom=13,
-                pitch=0,
-            ),
-            layers=[
-                pdk.Layer(
-                    'ScatterplotLayer',
-                    data=[{"position": [lon, lat]}],
-                    get_position='position',
-                    get_color='[200, 30, 0, 160]',
-                    get_radius=100,
-                ),
-            ],
-        ))
-
-    st.markdown(f"""
-        <h3>{name}</h3>
-        <p><strong>{category}</strong> • ⭐ {rating} • {price}</p>
-        <p>{address}</p>
-        <p>{dist_text}</p>
-    </div>
-    """, unsafe_allow_html=True)
+            # Close the card container with trail info list
+            st.markdown(f"""
+                <p><strong>Trail Info:</strong></p>
+                <ul>
+                    <li>Length: {trail_distance:.2f} km</li>
+                    <li>Duration: ~{duration_min} min</li>
+                    <li>Ascent: +{int(ascent)} m &nbsp;•&nbsp; Descent: -{int(descent)} m</li>
+                </ul>
+            </div>
+            """, unsafe_allow_html=True)
+        else:
+            # If no user location or coordinates, fall back to a basic carousel card display
+            render_carousel_card(activity, distance_km)
+    else:
+        # --- Other categories: use the generic carousel card layout ---
+        render_carousel_card(activity, distance_km)
