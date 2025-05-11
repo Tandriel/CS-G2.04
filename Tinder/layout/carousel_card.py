@@ -1,88 +1,91 @@
 import streamlit as st
 import html
 import pydeck as pdk
-from ui_components import inject_custom_css
 
 def render_carousel_card(activity, distance_km=None):
-    """
-    Render a carousel-style card with up to two images and a map marker for the activity.
-    Displays activity name, category, rating, price, address, and distance.
-    """
-    inject_custom_css()  # Ensure card CSS is loaded for styling
-
-    # Extract and sanitize activity information
+    """Render an activity card with a carousel of images and a map (if available)."""
+    # Prepare activity data
     name = html.escape(activity.get("name", "Unknown"))
     category = html.escape(activity.get("category", "Activity"))
     rating = activity.get("rating", "N/A")
     address = html.escape(activity.get("address", ""))
     price = activity.get("price", "")
-    distance_text = f"{distance_km:.1f} km away" if distance_km is not None else ""
+    photos = activity.get("photos") or [activity.get("image_url")]
     lat = activity.get("lat")
     lon = activity.get("lon")
 
-    # Prepare list of images (up to 2) for the carousel. Fallback to a placeholder if none.
-    photos = activity.get("photos")
-    if not photos or len(photos) == 0:
-        # If no photo list, try a single image_url or use a generic Unsplash image
-        image_url = activity.get("image_url")
-        photos = [image_url] if image_url else []
-    # If still no photos, use a random generic image as placeholder
-    if len(photos) == 0:
-        photos = ["https://source.unsplash.com/600x400/?activity"]
-    # Limit to at most 2 photos for the carousel
-    photos = photos[:2]
+    # Use at most two photos for the carousel, plus a map placeholder if coordinates are available
+    items = photos[:2]
+    if lat and lon:
+        items.append("__map__")
 
-    # Determine total slides (photos + map if location available)
-    show_map = (lat is not None and lon is not None)
-    total_slides = len(photos) + (1 if show_map else 0)
+    # Initialize carousel index in session state if not present
+    if "carousel_index" not in st.session_state:
+        st.session_state.carousel_index = 0
+    index = st.session_state.carousel_index
+    max_index = len(items) - 1
 
-    # Initialize session state index for this carousel if not set
-    carousel_key = f"{name.replace(' ', '_')}_carousel"
-    index_key = f"index_{carousel_key}"
-    if index_key not in st.session_state:
-        st.session_state[index_key] = 0
-    current_index = st.session_state[index_key]
+    # Carousel navigation buttons (Previous/Next)
+    cols = st.columns([1, 6, 1])
+    with cols[0]:
+        if st.button("⬅️", key=f"left-{name}"):
+            st.session_state.carousel_index = max(index - 1, 0)
+    with cols[2]:
+        if st.button("➡️", key=f"right-{name}"):
+            st.session_state.carousel_index = min(index + 1, max_index)
 
-    # Carousel navigation arrows
-    nav_cols = st.columns([1, 6, 1])  # three columns: left arrow, spacer, right arrow
-    with nav_cols[0]:
-        if st.button("⬅️", key=f"prev_{carousel_key}") and current_index > 0:
-            st.session_state[index_key] = current_index - 1
-            current_index = st.session_state[index_key]
-    with nav_cols[2]:
-        if st.button("➡️", key=f"next_{carousel_key}") and current_index < total_slides - 1:
-            st.session_state[index_key] = current_index + 1
-            current_index = st.session_state[index_key]
+    # Card container for carousel content
+    st.markdown('<div class="card-container">', unsafe_allow_html=True)
 
-    # Open the card container
-    st.markdown(f"<div class='card'>", unsafe_allow_html=True)
-
-    # Display the current slide: either an image or the map marker
-    if current_index < len(photos):
-        # Show image slide
-        img_url = photos[current_index]
-        st.markdown(f"<img src='{img_url}' alt='Activity image' style='width:100%;'>", unsafe_allow_html=True)
-    elif show_map and current_index == len(photos):
-        # Show map slide (Pydeck map with a marker at the activity location)
+    # Display either an image or the map, depending on the current carousel item
+    if items[index] == "__map__":
+        # Show an interactive map with a marker and label at the activity location
+        label_text = name
+        if rating and rating != "N/A":
+            label_text += f" – {rating}★"
+        map_layers = [
+            # Marker for location
+            pdk.Layer(
+                "ScatterplotLayer",
+                data=[{"position": [lon, lat]}],
+                get_position="position",
+                get_color=[200, 30, 0, 160],
+                get_radius=150
+            )
+        ]
+        # Add a text label layer for name (and rating if available)
+        map_layers.append(
+            pdk.Layer(
+                "TextLayer",
+                data=[{"position": [lon, lat], "text": label_text}],
+                get_position="position",
+                get_text="text",
+                get_color=[0, 0, 0, 200],
+                get_size=16,
+                get_alignment_baseline="'bottom'"
+            )
+        )
         st.pydeck_chart(pdk.Deck(
-            map_style="mapbox://styles/mapbox/light-v9",
+            map_style='mapbox://styles/mapbox/light-v9',
             initial_view_state=pdk.ViewState(latitude=lat, longitude=lon, zoom=13, pitch=0),
-            layers=[
-                pdk.Layer(
-                    "ScatterplotLayer",
-                    data=[{"position": [lon, lat]}],
-                    get_position="position",
-                    get_color=[200, 30, 0, 160],  # semi-transparent red marker
-                    get_radius=100
-                )
-            ]
-        ), use_container_width=True)
+            layers=map_layers
+        ))
+    else:
+        # Display photo
+        image_url = items[index]
+        if image_url:  # Only display if URL is valid
+            st.markdown(f'<img src="{image_url}" alt="Activity Image">', unsafe_allow_html=True)
+        else:
+            st.markdown(f'<p><em>No image available</em></p>', unsafe_allow_html=True)
 
-    # Display the activity metadata under the image/map, then close the card container
-    st.markdown(f"""
-        <h3>{name}</h3>
-        <p><strong>{category}</strong> • ⭐ {rating} • {price}</p>
-        <p>{address}</p>
-        <p>{distance_text}</p>
-    </div>
-    """, unsafe_allow_html=True)
+    # Display activity info (name, category, rating, price, address, distance)
+    info_parts = [f"<strong>{category}</strong>"]
+    if rating and rating != "N/A":
+        info_parts.append(f"⭐ {rating}")
+    if price:
+        info_parts.append(html.escape(price))
+    info_line = " • ".join(info_parts)
+    info_html = f"<h2>{name}</h2>\n<p>{info_line}</p>\n<p>{address}</p>"
+    if distance_km is not None:
+        info_html += f"\n<p>{distance_km:.1f} km away</p>"
+    st.markdown(info_html + "\n</div>", unsafe_allow_html=True)
