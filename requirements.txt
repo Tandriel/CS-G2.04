@@ -1,6 +1,0 @@
-streamlit 
-requests
-pandas
-pydeck 
-html5lib
-geopy
