@@ -1,0 +1,12 @@
+streamlit>=1.18.0
+requests
+folium
+polyline
+streamlit-folium
+pandas
+Pillow
+geopy
+scikit-learn
+streamlit-card
+gpxpy
+selenium
